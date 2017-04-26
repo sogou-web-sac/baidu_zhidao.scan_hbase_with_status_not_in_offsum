@@ -1,5 +1,6 @@
 #!/bin/bash
 
+#INPUT_TABLE="push:test_table"
 INPUT_TABLE="web:zhidao_baidu"
 OUTPUT="/user/zhufangze/tmp/xxx"
 MAX_SELECT_NUM=200000

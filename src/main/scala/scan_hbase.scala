@@ -15,16 +15,29 @@ object SparkOnHBase {
     Base64.encodeBytes(proto.toByteArray)
   }
 
-  def m_map(x:(ImmutableBytesWritable, Result)) : (String, String, Int) = {
+  def m_map(x:(ImmutableBytesWritable, Result)) : (String, String, Int, Long, String) = {
     // please look at http://hbase.apache.org/apidocs/org/apache/hadoop/hbase/client/Result.html to understand what "Result" is.
     var result = x._2
+    var key = Bytes.toString( result.getRow() )
     var url = Bytes.toString( result.getValue("u".getBytes, "u".getBytes) )
     var value = Bytes.toString( result.getValue("i".getBytes, "status".getBytes) )
     var versions = result.getColumnCells("i".getBytes, "status".getBytes)
-    return (url, value, versions.size)
+    var ts_last_fetch = 0L
+    if (versions.size >= 1) {
+      ts_last_fetch = versions.get(0).getTimestamp() // ts_last_fetch is 12bit
+    }
+    // Test
+    //var url = Bytes.toString( result.getRow() )
+    //var value = Bytes.toString( result.getValue("info".getBytes, "status".getBytes) )
+    //var versions = result.getColumnCells("info".getBytes, "status".getBytes)
+    //var ts_last_fetch = 0L
+    //if (versions.size >= 1) {
+    //  ts_last_fetch = versions.get(0).getTimestamp() // ts_last_fetch is 12bit
+    //}
+    return (url, value, versions.size, ts_last_fetch, key)
   }
  
-  def prob_select(x: (String, String, Int)) : Boolean = {
+  def prob_select(x: (String, String, Int, Long, String)) : Boolean = {
     // If fetching time <= 2, just select it
     // othervise, do probability selecting
     if (x._3 <= 3) {
@@ -35,6 +48,14 @@ object SparkOnHBase {
     if (r == 0) {
       return true
     }
+    return false
+  }
+  
+  def rm_recent_fetched(x: (String, String, Int, Long, String)) : Boolean = {
+    // rm last status is within 5 hours
+    var ts_cur = System.currentTimeMillis // ts_cur is 12bit
+    if (ts_cur - x._4 > 5*3600*1000)
+      return true
     return false
   }
 
@@ -60,7 +81,13 @@ object SparkOnHBase {
     // input_rdd is a array of tuple: [(ImmutableBytesWritable, Result), (ImmutableBytesWritable, Result), ...]
     // TODO
     var rdd = hbase_rdd.map(m_map).filter(p => (p._2 != null) && (p._2 == "N"))
-    var l = rdd.filter(prob_select).take(max_select_num)
-    sc.parallelize(l, 10).saveAsTextFile(output)
+    rdd.filter(prob_select).filter(rm_recent_fetched).repartition(10).saveAsTextFile(output)
+    
+    // Test
+    //var rdd = hbase_rdd.map(m_map).filter(p => (p._2 != null) && (p._2 == "open"))
+    //var l = rdd.filter(rm_recent_fetched).collect()
+    //for (e <- l) {
+    //  println(e)
+    //}
   }
 }
